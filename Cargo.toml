@@ -1,0 +1,6 @@
+[package]
+name = "rstv"
+version = "0.1.0"
+authors = ["Mitch Labrenz <MitchSLabrenz@gmail.com>"]
+
+[dependencies]
