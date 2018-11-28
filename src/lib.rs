@@ -50,6 +50,9 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
     }
 
     pub fn run_election(&mut self, seats: usize) -> Result<Vec<T>, ElectionErr> {
+        if seats == 0 {
+            return Ok(Vec::new());
+        }
         if self.candidates.len() < seats {
             return Ok(self.candidates.clone());
         }
@@ -62,10 +65,8 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         let mut elected = Vec::new();
         let mut i = 0;
         loop {
-            println!("{}", i);
             let new_electors = self.compute(&mut candidates, seats)?;
             for elector in new_electors.iter() {
-                println!("Elected: {:?}", elector);
                 elected.push(elector.clone());
             }
             if new_electors.len() == 0 || elected.len() >= seats {
@@ -84,7 +85,6 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         candidates: &mut HashMap<T, Candidate>,
         seats: usize,
     ) -> Result<Vec<T>, ElectionErr> {
-        println!("{:?}", candidates);
         let mut iterations = 0;
 
         #[allow(unused_assignments)] // Closures don't count as reading?
@@ -98,15 +98,20 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         loop {
             let mut converged = true;
             let mut total_excess: f64 = 0.0;
+            iterations += 1;
+
+            for (_, v) in candidates.iter_mut() {
+                v.votes = 0.0;
+            }
 
             for (ballot, n) in self.ballots.iter() {
-                total_excess += ballot.iter().fold(0.0, |_excess, candidate| {
+                total_excess += ballot.iter().fold(*n as f64, |excess, candidate| {
                     if let Some(cv) = candidates.get_mut(candidate) {
-                        let a = cv.weight() * (*n as f64);
+                        let a = cv.weight() * (excess as f64);
                         cv.add_votes(a);
-                        (1.0 - cv.weight()) * (*n as f64)
+                        (1.0 - cv.weight()) * (excess as f64)
                     } else {
-                        *n as f64
+                        excess as f64
                     }
                 });
             }
@@ -134,7 +139,6 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
                 }
             }
 
-            iterations += 1;
             if iterations > self.max_iterations {
                 return Err(ElectionErr::MaxIterations(self.max_iterations));
             }
@@ -179,10 +183,10 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         almost.sort_by(|a, b| {
             let val_a = (candidates.get(a).unwrap()).max_votes;
             let val_b = (candidates.get(b).unwrap()).max_votes;
-            val_a.partial_cmp(&val_b).unwrap()
+            val_b.partial_cmp(&val_a).unwrap()
         });
-        for (_, c) in candidates.iter_mut() {
-            c.votes = 0.;
+        for (_, v) in candidates {
+            v.max_votes = 0.0;
         }
         Ok(almost)
     }
@@ -304,12 +308,27 @@ mod tests {
         //let mut voting = STV::with_candidates(&["Mark", "Bob", "Tim"]);
         let mut voting = STV::new();
         voting.add_ballots(ballots);
-        let results = voting.run_election(4);
+        let results = voting.run_election(3);
         match results {
             Ok(results) => assert_eq!(results, vec!["Alice", "Bob", "Chris"]),
             Err(e) => {
                 panic!("{}", e);
             }
+        }
+    }
+
+    #[test]
+    fn small_test() {
+        let a = vec![1, 2, 3];
+        let b = vec![1, 3, 4];
+        let c = vec![2, 3, 4];
+        let ballots = vec![a, b, c];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let r = election.run_election(3);
+        match r {
+            Ok(results) => assert_eq!(results, vec![1, 2, 3]),
+            Err(e) => panic!("{}", e),
         }
     }
 }
