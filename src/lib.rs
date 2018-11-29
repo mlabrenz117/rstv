@@ -63,19 +63,55 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
             .map(|c| (c.clone(), Candidate::new()))
             .collect();
         let mut elected = Vec::new();
-        let mut i = 0;
         loop {
-            let new_electors = self.compute(&mut candidates, seats)?;
-            for elector in new_electors.iter() {
-                elected.push(elector.clone());
+            loop {
+                let new_electors = self.compute(&mut candidates, seats)?;
+                for elector in new_electors.iter() {
+                    elected.push(elector.clone());
+                }
+                if new_electors.is_empty() || elected.len() >= seats {
+                    break;
+                }
             }
-            if new_electors.len() == 0 || elected.len() >= seats {
+
+            if elected.len() < seats {
+                exclude_lowest(&mut candidates);
+                let num_excluded = candidates
+                    .iter()
+                    .filter(|(_, v)| v.status.is_excluded())
+                    .count();
+                if self.candidates.len() - num_excluded == seats {
+                    let mut hopefuls: Vec<_> = candidates
+                        .iter_mut()
+                        .filter(|(_, v)| v.status.is_hopeful())
+                        .collect();
+                    hopefuls
+                        .sort_by(|(_, b), (_, d)| d.max_votes.partial_cmp(&b.max_votes).unwrap());
+                    for (candidate, v) in hopefuls {
+                        v.status = CandidateStatus::Elected(1.0);
+                        elected.push(candidate.clone())
+                    }
+                }
+            }
+
+            if elected.len() == seats {
+                candidates
+                    .iter_mut()
+                    .filter(|(_, v)| v.status.is_hopeful())
+                    .for_each(|(_, v)| v.status = CandidateStatus::Excluded);
                 break;
             }
-            i += 1;
         }
 
-        if elected.len() < seats {}
+        candidates.iter().for_each(|(c, _)| println!("{:?}", c));
+        println!("{:?}", elected);
+
+        // Assert that the CandidateStatus invariants are upheld.
+        debug_assert!(candidates.iter().all(|(c, v)| if elected.contains(c) {
+            v.status.is_elected()
+        } else {
+            v.status.is_excluded()
+        }));
 
         Ok(elected)
     }
@@ -92,7 +128,7 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
 
         let num_elected = candidates
             .iter()
-            .filter(|(_, c)| c.status == CandidateStatus::Elected(1.0))
+            .filter(|(_, c)| c.status.is_elected())
             .count();
 
         loop {
@@ -150,7 +186,7 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         let mut almost = HashSet::new();
         candidates
             .iter()
-            .filter(|(_, c)| c.status == CandidateStatus::Hopeful && c.votes >= quota)
+            .filter(|(_, c)| c.status.is_hopeful() && c.votes >= quota)
             .for_each(|(c, _)| {
                 almost.insert(c.clone());
             });
@@ -158,15 +194,10 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
         while almost.len() + num_elected > seats {
             candidates
                 .iter_mut()
-                .filter(|(_, c)| c.status == CandidateStatus::Hopeful) // LOOK_CLOSER
+                .filter(|(cand, c)| c.status.is_hopeful() && !almost.contains(cand))
                 .for_each(|(_, c)| c.status = CandidateStatus::Excluded);
-            let lowest = candidates
-                .iter_mut()
-                // May need a filter here
-                .min_by(|(_, c1), (_, c)| (*c).votes.partial_cmp(&(c1).votes).unwrap())
-                .unwrap();
-            lowest.1.status = CandidateStatus::Excluded;
-            almost.remove(lowest.0);
+            let lowest = exclude_lowest(candidates);
+            almost.remove(&lowest);
         }
 
         let total_elected = num_elected + almost.len();
@@ -185,9 +216,11 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
             let val_b = (candidates.get(b).unwrap()).max_votes;
             val_b.partial_cmp(&val_a).unwrap()
         });
-        for (_, v) in candidates {
+
+        for v in candidates.values_mut() {
             v.max_votes = 0.0;
         }
+
         Ok(almost)
     }
 
@@ -245,18 +278,38 @@ impl CandidateStatus {
             CandidateStatus::Elected(w) => *w,
         }
     }
-}
 
-impl PartialEq<CandidateStatus> for CandidateStatus {
-    fn eq(&self, other: &CandidateStatus) -> bool {
-        use CandidateStatus::*;
-        match (self, other) {
-            (Hopeful, Hopeful) => true,
-            (Excluded, Excluded) => true,
-            (Elected(_), Elected(_)) => true,
+    fn is_elected(&self) -> bool {
+        match self {
+            CandidateStatus::Elected(_) => true,
             _ => false,
         }
     }
+
+    fn is_excluded(&self) -> bool {
+        match self {
+            CandidateStatus::Excluded => true,
+            _ => false,
+        }
+    }
+
+    fn is_hopeful(&self) -> bool {
+        match self {
+            CandidateStatus::Hopeful => true,
+            _ => false,
+        }
+    }
+}
+
+fn exclude_lowest<T: Eq + Hash + Clone + Debug>(candidates: &mut HashMap<T, Candidate>) -> &T {
+    let lowest = candidates
+        .iter_mut()
+        .filter(|(_, v)| v.status.is_hopeful())
+        .min_by(|(_, c1), (_, c)| (*c).votes.partial_cmp(&(c1).votes).unwrap())
+        .unwrap();
+    lowest.1.status = CandidateStatus::Excluded;
+    //println!("Candidate {:?} excluded", lowest.0);
+    lowest.0
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,7 +338,7 @@ impl Error for ElectionErr {
 mod tests {
     use super::*;
     #[test]
-    fn it_works() {
+    fn it_works() -> Result<(), ElectionErr> {
         let a = vec!["Alice", "Bob", "Chris"];
         let b = vec!["Bob", "Alice", "Chris"];
         let c = vec!["Chris"];
@@ -305,30 +358,79 @@ mod tests {
             ballots.push(d.clone());
         }
         ballots.push(e);
-        //let mut voting = STV::with_candidates(&["Mark", "Bob", "Tim"]);
-        let mut voting = STV::new();
-        voting.add_ballots(ballots);
-        let results = voting.run_election(3);
-        match results {
-            Ok(results) => assert_eq!(results, vec!["Alice", "Bob", "Chris"]),
-            Err(e) => {
-                panic!("{}", e);
-            }
-        }
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let results = election.run_election(3)?;
+        assert_eq!(results, vec!["Alice", "Bob", "Chris"]);
+        Ok(())
     }
 
     #[test]
-    fn small_test() {
+    fn basics() -> Result<(), ElectionErr> {
         let a = vec![1, 2, 3];
         let b = vec![1, 3, 4];
         let c = vec![2, 3, 4];
         let ballots = vec![a, b, c];
         let mut election = STV::new();
         election.add_ballots(ballots);
-        let r = election.run_election(3);
-        match r {
-            Ok(results) => assert_eq!(results, vec![1, 2, 3]),
-            Err(e) => panic!("{}", e),
-        }
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![1, 2, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn can_elect_one() -> Result<(), ElectionErr> {
+        let a = vec![1, 2, 3];
+        let b = vec![1, 3, 4];
+        let c = vec![2, 3, 4];
+        let ballots = vec![a, b, c];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let r = election.run_election(1)?;
+        assert_eq!(r, vec![1]);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_way_tie_no_one_reaches_quota() -> Result<(), ElectionErr> {
+        let a = vec![1];
+        let b = vec![2];
+        let c = vec![3];
+        let ballots = vec![a, b, c];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let results = election.run_election(1)?;
+        assert!(results.contains(&1) ^ results.contains(&2) ^ results.contains(&3));
+        Ok(())
+    }
+
+    #[test]
+    fn elect_all() -> Result<(), ElectionErr> {
+        let a = vec![1, 2];
+        let b = vec![2, 1];
+        let ballots = vec![a.clone(), b, a];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let results = election.run_election(3)?;
+        assert_eq!(results, vec![1, 2]);
+        Ok(())
+    }
+
+    #[test]
+    fn forced_random() -> Result<(), ElectionErr> {
+        let a = vec![1, 2];
+        let b = vec![2, 1];
+        let c = vec![3];
+        let d = vec![4];
+        let ballots = vec![a.clone(), a.clone(), b.clone(), b.clone(), c, d];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let results = election.run_election(3)?;
+        assert!(
+            results.contains(&1)
+                && results.contains(&2)
+                && (results.contains(&3) ^ results.contains(&4))
+        );
+        Ok(())
     }
 }
