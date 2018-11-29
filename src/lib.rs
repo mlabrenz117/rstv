@@ -370,6 +370,10 @@ mod tests {
         election.add_ballots(ballots);
         let r = election.run_election(3)?;
         assert_eq!(r, vec![1, 2, 3]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![1, 2, 3]);
         Ok(())
     }
 
@@ -381,6 +385,10 @@ mod tests {
         let ballots = vec![a, b, c];
         let mut election = STV::new();
         election.add_ballots(ballots);
+        let r = election.run_election(1)?;
+        assert_eq!(r, vec![1]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
         let r = election.run_election(1)?;
         assert_eq!(r, vec![1]);
         Ok(())
@@ -396,6 +404,10 @@ mod tests {
         election.add_ballots(ballots);
         let results = election.run_election(1)?;
         assert!(results.contains(&1) ^ results.contains(&2) ^ results.contains(&3));
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
+        let results = election.run_election(1)?;
+        assert!(results.contains(&1) ^ results.contains(&2) ^ results.contains(&3));
         Ok(())
     }
 
@@ -406,6 +418,10 @@ mod tests {
         let ballots = vec![a.clone(), b, a];
         let mut election = STV::new();
         election.add_ballots(ballots);
+        let results = election.run_election(3)?;
+        assert_eq!(results, vec![1, 2]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
         let results = election.run_election(3)?;
         assert_eq!(results, vec![1, 2]);
         Ok(())
@@ -426,6 +442,14 @@ mod tests {
                 && results.contains(&2)
                 && (results.contains(&3) ^ results.contains(&4))
         );
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
+        let results = election.run_election(3)?;
+        assert!(
+            results.contains(&1)
+                && results.contains(&2)
+                && (results.contains(&3) ^ results.contains(&4))
+        );
         Ok(())
     }
 
@@ -437,6 +461,10 @@ mod tests {
         let ballots = vec![a, b, c];
         let mut election = STV::new();
         election.add_ballots(ballots);
+        let r = election.run_election(0)?;
+        assert_eq!(r, vec![]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
         let r = election.run_election(0)?;
         assert_eq!(r, vec![]);
         Ok(())
