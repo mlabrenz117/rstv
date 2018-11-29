@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Display};
 use std::hash::Hash;
 
 pub struct STV<T> {
@@ -11,7 +11,7 @@ pub struct STV<T> {
     max_iterations: u64,
 }
 
-impl<T: Clone + Eq + Hash + Debug> STV<T> {
+impl<T: Clone + Eq + Hash> STV<T> {
     pub fn new() -> Self {
         STV {
             candidates: Vec::new(),
@@ -38,7 +38,8 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
             let ballot: Vec<T> = ballot
                 .into_iter()
                 .inspect(|candidate| {
-                    // This seems like a side affect, not sure if this is idiomatic
+                    // Using inspect like this seems like a side affect;
+                    // not sure if this is idiomatic?
                     if !self.closed_election && !self.candidates.contains(candidate) {
                         self.candidates.push(candidate.clone());
                     }
@@ -50,9 +51,6 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
     }
 
     pub fn run_election(&mut self, seats: usize) -> Result<Vec<T>, ElectionErr> {
-        if seats == 0 {
-            return Ok(Vec::new());
-        }
         if self.candidates.len() < seats {
             return Ok(self.candidates.clone());
         }
@@ -102,9 +100,6 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
                 break;
             }
         }
-
-        candidates.iter().for_each(|(c, _)| println!("{:?}", c));
-        println!("{:?}", elected);
 
         // Assert that the CandidateStatus invariants are upheld.
         debug_assert!(candidates.iter().all(|(c, v)| if elected.contains(c) {
@@ -229,7 +224,7 @@ impl<T: Clone + Eq + Hash + Debug> STV<T> {
     }
 }
 
-impl<T: Clone + Eq + Hash + Debug> Default for STV<T> {
+impl<T: Clone + Eq + Hash> Default for STV<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -301,7 +296,7 @@ impl CandidateStatus {
     }
 }
 
-fn exclude_lowest<T: Eq + Hash + Clone + Debug>(candidates: &mut HashMap<T, Candidate>) -> &T {
+fn exclude_lowest<T: Eq + Hash>(candidates: &mut HashMap<T, Candidate>) -> &T {
     let lowest = candidates
         .iter_mut()
         .filter(|(_, v)| v.status.is_hopeful())
@@ -431,6 +426,19 @@ mod tests {
                 && results.contains(&2)
                 && (results.contains(&3) ^ results.contains(&4))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn elect_none() -> Result<(), ElectionErr> {
+        let a = vec![1, 2, 3];
+        let b = vec![1, 3, 4];
+        let c = vec![2, 3, 4];
+        let ballots = vec![a, b, c];
+        let mut election = STV::new();
+        election.add_ballots(ballots);
+        let r = election.run_election(0)?;
+        assert_eq!(r, vec![]);
         Ok(())
     }
 }
