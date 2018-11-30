@@ -11,7 +11,7 @@ pub struct STV<T> {
     max_iterations: u64,
 }
 
-impl<T: Clone + Eq + Hash> STV<T> {
+impl<T: Clone + Eq + Hash + std::fmt::Debug> STV<T> {
     pub fn new() -> Self {
         STV {
             candidates: Vec::new(),
@@ -61,19 +61,22 @@ impl<T: Clone + Eq + Hash> STV<T> {
             .map(|c| (c.clone(), Candidate::new()))
             .collect();
         let mut elected = Vec::new();
-        loop {
-            loop {
+        'main: loop {
+            'compute: loop {
                 let new_electors = self.compute(&mut candidates, seats)?;
                 for elector in new_electors.iter() {
                     elected.push(elector.clone());
                 }
                 if new_electors.is_empty() || elected.len() >= seats {
-                    break;
+                    break 'compute;
                 }
             }
 
             if elected.len() < seats {
-                exclude_lowest(&mut candidates);
+                if let None = exclude_lowest(&mut candidates) {
+                    println!("{:?}", candidates);
+                    break 'main; //No more candidates can be elected
+                }
                 let num_excluded = candidates
                     .iter()
                     .filter(|(_, v)| v.status.is_excluded())
@@ -97,7 +100,7 @@ impl<T: Clone + Eq + Hash> STV<T> {
                     .iter_mut()
                     .filter(|(_, v)| v.status.is_hopeful())
                     .for_each(|(_, v)| v.status = CandidateStatus::Excluded);
-                break;
+                break 'main;
             }
         }
 
@@ -192,7 +195,7 @@ impl<T: Clone + Eq + Hash> STV<T> {
                 .filter(|(cand, c)| c.status.is_hopeful() && !almost.contains(cand))
                 .for_each(|(_, c)| c.status = CandidateStatus::Excluded);
             let lowest = exclude_lowest(candidates);
-            almost.remove(&lowest);
+            almost.remove(&lowest.unwrap());
         }
 
         let total_elected = num_elected + almost.len();
@@ -224,7 +227,7 @@ impl<T: Clone + Eq + Hash> STV<T> {
     }
 }
 
-impl<T: Clone + Eq + Hash> Default for STV<T> {
+impl<T: Clone + Eq + Hash + std::fmt::Debug> Default for STV<T> {
     fn default() -> Self {
         Self::new()
     }
@@ -296,15 +299,17 @@ impl CandidateStatus {
     }
 }
 
-fn exclude_lowest<T: Eq + Hash>(candidates: &mut HashMap<T, Candidate>) -> &T {
-    let lowest = candidates
+fn exclude_lowest<T: Eq + Hash>(candidates: &mut HashMap<T, Candidate>) -> Option<&T> {
+    if let Some(lowest) = candidates
         .iter_mut()
         .filter(|(_, v)| v.status.is_hopeful())
         .min_by(|(_, c1), (_, c)| (*c).votes.partial_cmp(&(c1).votes).unwrap())
-        .unwrap();
-    lowest.1.status = CandidateStatus::Excluded;
-    //println!("Candidate {:?} excluded", lowest.0);
-    lowest.0
+    {
+        lowest.1.status = CandidateStatus::Excluded;
+        Some(lowest.0)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -374,6 +379,32 @@ mod tests {
         election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
         let r = election.run_election(3)?;
         assert_eq!(r, vec![1, 2, 3]);
+        Ok(())
+    }
+
+    #[test]
+    fn candidates_basics() -> Result<(), ElectionErr> {
+        let a = vec![1, 2, 3];
+        let b = vec![1, 3, 4];
+        let c = vec![2, 3, 4];
+        let ballots = vec![a, b, c];
+        let mut election = STV::with_candidates(&[1, 2, 3, 4]);
+        election.add_ballots(ballots.clone());
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![1, 2, 3]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![1, 2, 3]);
+
+        let mut election = STV::with_candidates(&[2, 3, 4]);
+        election.add_ballots(ballots);
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![2, 3, 4]);
+        let d = vec![];
+        election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
+        let r = election.run_election(3)?;
+        assert_eq!(r, vec![2, 3, 4]);
         Ok(())
     }
 
@@ -467,6 +498,33 @@ mod tests {
         election.add_ballots(vec![d.clone(), d.clone(), d.clone(), d]);
         let r = election.run_election(0)?;
         assert_eq!(r, vec![]);
+        Ok(())
+    }
+
+    #[test]
+    fn empty_votes() -> Result<(), ElectionErr> {
+        let a: Vec<u8> = Vec::new();
+        let mut election = STV::new();
+        let r = election.run_election(1)?;
+        println!("{:?}", r);
+        assert!(r.is_empty());
+        let ballots = vec![a.clone(), a.clone(), a];
+        election.add_ballots(ballots);
+        let r = election.run_election(1)?;
+        assert!(r.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn closed_election() -> Result<(), ElectionErr> {
+        let v = vec![1, 2];
+        let ballots = vec![v.clone(), v];
+        let mut election = STV::with_candidates(&[2]);
+        election.add_ballots(ballots);
+        let r = election.run_election(2)?;
+        assert_eq!(r, vec![2]);
+        let r = election.run_election(1)?;
+        assert_eq!(r, vec![2]);
         Ok(())
     }
 }
