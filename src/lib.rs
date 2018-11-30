@@ -74,7 +74,6 @@ impl<T: Clone + Eq + Hash + std::fmt::Debug> STV<T> {
 
             if elected.len() < seats {
                 if let None = exclude_lowest(&mut candidates) {
-                    println!("{:?}", candidates);
                     break 'main; //No more candidates can be elected
                 }
                 let num_excluded = candidates
@@ -134,7 +133,7 @@ impl<T: Clone + Eq + Hash + std::fmt::Debug> STV<T> {
             let mut total_excess: f64 = 0.0;
             iterations += 1;
 
-            for (_, v) in candidates.iter_mut() {
+            for v in candidates.values_mut() {
                 v.votes = 0.0;
             }
 
@@ -152,7 +151,7 @@ impl<T: Clone + Eq + Hash + std::fmt::Debug> STV<T> {
 
             quota = {
                 let v = ((self.total_voters as f64) - total_excess) / (seats + 1) as f64;
-                if v >= 0.0001 {
+                if v >= 0.0001 || self.total_voters == 0 {
                     v
                 } else {
                     0.0001
@@ -214,10 +213,6 @@ impl<T: Clone + Eq + Hash + std::fmt::Debug> STV<T> {
             let val_b = (candidates.get(b).unwrap()).max_votes;
             val_b.partial_cmp(&val_a).unwrap()
         });
-
-        for v in candidates.values_mut() {
-            v.max_votes = 0.0;
-        }
 
         Ok(almost)
     }
@@ -303,7 +298,7 @@ fn exclude_lowest<T: Eq + Hash>(candidates: &mut HashMap<T, Candidate>) -> Optio
     if let Some(lowest) = candidates
         .iter_mut()
         .filter(|(_, v)| v.status.is_hopeful())
-        .min_by(|(_, c1), (_, c)| (*c).votes.partial_cmp(&(c1).votes).unwrap())
+        .min_by(|(_, c1), (_, c2)| (*c1).votes.partial_cmp(&(c2).votes).unwrap())
     {
         lowest.1.status = CandidateStatus::Excluded;
         Some(lowest.0)
@@ -506,7 +501,6 @@ mod tests {
         let a: Vec<u8> = Vec::new();
         let mut election = STV::new();
         let r = election.run_election(1)?;
-        println!("{:?}", r);
         assert!(r.is_empty());
         let ballots = vec![a.clone(), a.clone(), a];
         election.add_ballots(ballots);
@@ -525,6 +519,60 @@ mod tests {
         assert_eq!(r, vec![2]);
         let r = election.run_election(1)?;
         assert_eq!(r, vec![2]);
+        Ok(())
+    }
+
+    #[test]
+    fn one_candidate_no_votes() -> Result<(), ElectionErr> {
+        let mut election = STV::with_candidates(&[1]);
+        let r = election.run_election(1)?;
+        assert_eq!(r, vec![1]);
+        Ok(())
+    }
+
+    #[test]
+    fn two_candidates_no_votes() -> Result<(), ElectionErr> {
+        let mut election = STV::with_candidates(&[1, 2]);
+        let r = election.run_election(1)?;
+        assert!(r.contains(&1) ^ r.contains(&2));
+        Ok(())
+    }
+
+    #[test]
+    fn deque_basics() -> Result<(), ElectionErr> {
+        use std::collections::VecDeque;
+        let mut voter_a = VecDeque::new();
+        voter_a.push_front("sue");
+        voter_a.push_front("bill");
+        voter_a.push_front("bob");
+
+        let mut voter_b = VecDeque::new();
+        voter_b.push_front("bill");
+        voter_b.push_front("bob");
+        voter_b.push_front("sue");
+
+        let mut voter_c = VecDeque::new();
+        voter_c.push_front("bob");
+        voter_c.push_front("sue");
+        voter_c.push_front("bill");
+
+        let mut voter_d = VecDeque::new();
+        voter_d.push_front("sue");
+        voter_d.push_front("bill");
+        voter_d.push_front("bob");
+
+        let mut voter_e = VecDeque::new();
+        voter_e.push_front("bill");
+        voter_e.push_front("bob");
+        voter_e.push_front("sue");
+
+        let vec = vec![voter_a, voter_b, voter_c, voter_d, voter_e];
+        let mut election = STV::new();
+        election.add_ballots(vec);
+        let winner = election.run_election(1)?;
+        assert_eq!(winner, vec!["sue"]);
+        let winners = election.run_election(2)?;
+        assert_eq!(winners, vec!["sue", "bob"]);
         Ok(())
     }
 }
